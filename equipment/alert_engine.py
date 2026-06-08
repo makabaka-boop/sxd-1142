@@ -8,18 +8,13 @@ from django.utils import timezone
 from .models import Alert, Equipment, InspectionRecord, MaintenancePlan
 
 
-def _make_issue_key(equipment_id, alert_type, description=''):
-    raw = f'{equipment_id}:{alert_type}:{description.strip().lower()}'
+def _make_issue_key(equipment_id, alert_type, extra=''):
+    raw = f'{equipment_id}:{alert_type}:{extra.strip().lower()}'
     return hashlib.md5(raw.encode('utf-8')).hexdigest()
 
 
-def _has_open_alert(equipment_id, alert_type, description=''):
-    issue_key = _make_issue_key(equipment_id, alert_type, description)
-    return Alert.objects.filter(issue_key=issue_key).exclude(status=Alert.STATUS_CLOSED).exists()
-
-
-def _create_alert_if_not_exists(equipment_id, alert_type, title, description='', assigned_to=None):
-    issue_key = _make_issue_key(equipment_id, alert_type, description)
+def _create_alert_if_not_exists(equipment_id, alert_type, title, description='', issue_key_extra='', assigned_to=None):
+    issue_key = _make_issue_key(equipment_id, alert_type, issue_key_extra)
     existing = Alert.objects.filter(issue_key=issue_key).exclude(status=Alert.STATUS_CLOSED).first()
     if existing:
         return existing, False
@@ -52,6 +47,7 @@ def check_maintenance_cycle():
             alert_type=Alert.TYPE_CYCLE,
             title=title,
             description=desc,
+            issue_key_extra=str(equip.id),
             assigned_to=equip.responsible_person,
         )
         if created_flag:
@@ -78,6 +74,7 @@ def check_consecutive_anomaly():
                 alert_type=Alert.TYPE_CONSECUTIVE_ANOMALY,
                 title=title,
                 description=desc,
+                issue_key_extra=str(equip.id),
                 assigned_to=equip.responsible_person,
             )
             if created_flag:
@@ -91,20 +88,21 @@ def check_timeout():
     open_alerts = Alert.objects.filter(
         status=Alert.STATUS_OPEN,
         created_at__lte=threshold_time,
-    )
+    ).exclude(alert_type=Alert.TYPE_TIMEOUT)
     created = []
     for alert in open_alerts:
         title = f'处理超时: {alert.equipment.name} - {alert.get_alert_type_display()}'
         desc = f'{alert.equipment.name}(编号{alert.equipment.code}) 提醒已超过{timeout_days}天未处理，原始提醒: {alert.title}'
-        new_alert, created_flag = _create_alert_if_not_exists(
+        alert_record, created_flag = _create_alert_if_not_exists(
             equipment_id=alert.equipment.id,
             alert_type=Alert.TYPE_TIMEOUT,
             title=title,
             description=desc,
+            issue_key_extra=str(alert.equipment.id),
             assigned_to=alert.equipment.responsible_person,
         )
         if created_flag:
-            created.append(new_alert)
+            created.append(alert_record)
     return created
 
 
@@ -129,6 +127,7 @@ def check_duplicate_repair():
                 alert_type=Alert.TYPE_DUPLICATE_REPAIR,
                 title=title,
                 description=desc,
+                issue_key_extra=f'{equip.id}:{issue_desc}',
                 assigned_to=equip.responsible_person,
             )
             if created_flag:

@@ -22,4 +22,8 @@ urlpatterns = [
 
     path('stats/by-equipment/', views.StatsByEquipmentView.as_view(), name='stats-by-equipment'),
     path('stats/by-person/', views.StatsByResponsiblePersonView.as_view(), name='stats-by-person'),
+
+    path('export/alerts/', views.ExportAlertsCsvView.as_view(), name='export-alerts'),
+    path('export/stats-by-equipment/', views.ExportStatsByEquipmentCsvView.as_view(), name='export-stats-by-equipment'),
+    path('export/stats-by-person/', views.ExportStatsByPersonCsvView.as_view(), name='export-stats-by-person'),
 ]
