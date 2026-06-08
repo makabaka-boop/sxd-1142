@@ -148,6 +148,21 @@ class RepairOrderCreateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id']
 
+    def validate(self, data):
+        inspection_record = data.get('inspection_record')
+        alert = data.get('alert')
+        equipment = data.get('equipment')
+
+        if not inspection_record and not alert:
+            raise serializers.ValidationError('必须至少关联一条异常巡查记录或一条提醒')
+
+        if inspection_record and inspection_record.equipment_id != equipment.id:
+            raise serializers.ValidationError('巡查记录与器械不匹配')
+        if alert and alert.equipment_id != equipment.id:
+            raise serializers.ValidationError('提醒与器械不匹配')
+
+        return data
+
     def validate_inspection_record(self, value):
         if value and value.status != InspectionRecord.STATUS_ABNORMAL:
             raise serializers.ValidationError('只能关联异常巡查记录')
@@ -161,6 +176,24 @@ class RepairOrderCreateSerializer(serializers.ModelSerializer):
 
 class RepairProgressSubmitSerializer(serializers.Serializer):
     content = serializers.CharField(required=True, min_length=1)
+
+
+class RepairOrderUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RepairOrder
+        fields = [
+            'id', 'equipment', 'inspection_record', 'alert',
+            'fault_type', 'fault_description', 'priority',
+            'expected_completion_time', 'handler', 'processing_note',
+            'status', 'completion_note', 'completion_time',
+            'confirmed_by', 'confirmed_at', 'created_by',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'equipment', 'inspection_record', 'alert',
+            'created_by', 'confirmed_by', 'confirmed_at',
+            'created_at', 'updated_at',
+        ]
 
 
 class RepairOrderCompletionRequestSerializer(serializers.Serializer):

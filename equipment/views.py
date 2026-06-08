@@ -20,6 +20,7 @@ from .serializers import (
     RepairOrderConfirmCloseSerializer,
     RepairOrderCreateSerializer,
     RepairOrderSerializer,
+    RepairOrderUpdateSerializer,
     RepairProgressSerializer,
     RepairProgressSubmitSerializer,
     UserCreateSerializer,
@@ -396,6 +397,9 @@ class RepairOrderListCreateView(generics.ListCreateAPIView):
         if order.alert:
             order.alert.status = Alert.STATUS_PROCESSING
             order.alert.save()
+        if order.equipment.status != Equipment.STATUS_UNDER_REPAIR:
+            order.equipment.status = Equipment.STATUS_UNDER_REPAIR
+            order.equipment.save()
         if order.handler and order.status == RepairOrder.STATUS_PENDING:
             order.status = RepairOrder.STATUS_IN_PROGRESS
             order.save()
@@ -405,11 +409,15 @@ class RepairOrderDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = RepairOrder.objects.select_related(
         'equipment', 'handler', 'created_by', 'inspection_record', 'alert', 'confirmed_by'
     ).prefetch_related('progresses').all()
-    serializer_class = RepairOrderSerializer
+
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return RepairOrderUpdateSerializer
+        return RepairOrderSerializer
 
     def get_permissions(self):
         if self.request.method in ['PUT', 'PATCH']:
-            return [IsAdminOrFieldStaff()]
+            return [IsAdmin()]
         if self.request.method == 'DELETE':
             return [IsAdmin()]
         return [IsAuthenticated()]
