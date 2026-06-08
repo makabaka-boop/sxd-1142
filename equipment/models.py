@@ -97,9 +97,11 @@ class MaintenancePlan(models.Model):
 class InspectionRecord(models.Model):
     STATUS_NORMAL = 'normal'
     STATUS_ABNORMAL = 'abnormal'
+    STATUS_RESOLVED = 'resolved'
     STATUS_CHOICES = [
         (STATUS_NORMAL, '正常'),
         (STATUS_ABNORMAL, '异常'),
+        (STATUS_RESOLVED, '已处理'),
     ]
     equipment = models.ForeignKey(
         Equipment, on_delete=models.CASCADE,
@@ -112,6 +114,7 @@ class InspectionRecord(models.Model):
     inspection_date = models.DateTimeField('巡查时间', auto_now_add=True)
     status = models.CharField('巡查状态', max_length=20, choices=STATUS_CHOICES, default=STATUS_NORMAL)
     issue_description = models.TextField('问题描述', blank=True, default='')
+    resolution_result = models.TextField('处理结果', blank=True, default='')
     created_at = models.DateTimeField('创建时间', auto_now_add=True)
     updated_at = models.DateTimeField('更新时间', auto_now=True)
 
@@ -129,11 +132,13 @@ class Alert(models.Model):
     TYPE_CONSECUTIVE_ANOMALY = 'consecutive_anomaly'
     TYPE_TIMEOUT = 'timeout'
     TYPE_DUPLICATE_REPAIR = 'duplicate_repair'
+    TYPE_INSPECTION_ABNORMAL = 'inspection_abnormal'
     TYPE_CHOICES = [
         (TYPE_CYCLE, '保养周期'),
         (TYPE_CONSECUTIVE_ANOMALY, '连续异常'),
         (TYPE_TIMEOUT, '处理超时'),
         (TYPE_DUPLICATE_REPAIR, '重复报修'),
+        (TYPE_INSPECTION_ABNORMAL, '巡查异常'),
     ]
     STATUS_OPEN = 'open'
     STATUS_PROCESSING = 'processing'
@@ -146,6 +151,10 @@ class Alert(models.Model):
     equipment = models.ForeignKey(
         Equipment, on_delete=models.CASCADE,
         related_name='alerts', verbose_name='器械'
+    )
+    inspection_record = models.ForeignKey(
+        InspectionRecord, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='alerts', verbose_name='关联巡查记录'
     )
     alert_type = models.CharField('提醒类型', max_length=30, choices=TYPE_CHOICES)
     title = models.CharField('提醒标题', max_length=200)

@@ -53,12 +53,16 @@ class MaintenancePlanSerializer(serializers.ModelSerializer):
 class InspectionRecordSerializer(serializers.ModelSerializer):
     inspector_name = serializers.CharField(source='inspector.username', read_only=True, default=None)
     equipment_name = serializers.CharField(source='equipment.name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    related_alert_id = serializers.IntegerField(source='alerts.first.id', read_only=True, default=None)
+    related_repair_order_id = serializers.IntegerField(source='repair_orders.first.id', read_only=True, default=None)
 
     class Meta:
         model = InspectionRecord
         fields = [
             'id', 'equipment', 'equipment_name', 'inspector', 'inspector_name',
-            'inspection_date', 'status', 'issue_description',
+            'inspection_date', 'status', 'status_display', 'issue_description',
+            'resolution_result', 'related_alert_id', 'related_repair_order_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'inspection_date', 'created_at', 'updated_at']
@@ -72,16 +76,21 @@ class AlertSerializer(serializers.ModelSerializer):
     confirmed_by_name = serializers.CharField(source='confirmed_by.username', read_only=True, default=None)
     alert_type_display = serializers.CharField(source='get_alert_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    inspection_record_id = serializers.IntegerField(source='inspection_record.id', read_only=True, default=None)
+    inspection_record_status = serializers.CharField(source='inspection_record.get_status_display', read_only=True, default=None)
+    related_repair_order_id = serializers.IntegerField(source='repair_orders.first.id', read_only=True, default=None)
 
     class Meta:
         model = Alert
         fields = [
             'id', 'equipment', 'equipment_name', 'equipment_code',
+            'inspection_record', 'inspection_record_id', 'inspection_record_status',
             'alert_type', 'alert_type_display', 'title', 'description',
             'issue_key', 'status', 'status_display',
             'assigned_to', 'assigned_to_name',
             'close_request_note', 'close_requested_at', 'close_requested_by', 'close_requested_by_name',
             'confirmed_at', 'confirmed_by', 'confirmed_by_name',
+            'related_repair_order_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -117,13 +126,16 @@ class RepairOrderSerializer(serializers.ModelSerializer):
     priority_display = serializers.CharField(source='get_priority_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     alert_title = serializers.CharField(source='alert.title', read_only=True, default=None)
+    inspection_record_status = serializers.CharField(source='inspection_record.get_status_display', read_only=True, default=None)
+    inspection_record_issue = serializers.CharField(source='inspection_record.issue_description', read_only=True, default=None)
     progresses = RepairProgressSerializer(many=True, read_only=True)
 
     class Meta:
         model = RepairOrder
         fields = [
             'id', 'equipment', 'equipment_name', 'equipment_code',
-            'inspection_record', 'alert', 'alert_title',
+            'inspection_record', 'inspection_record_status', 'inspection_record_issue',
+            'alert', 'alert_title',
             'fault_type', 'fault_type_display', 'fault_description',
             'priority', 'priority_display', 'expected_completion_time',
             'handler', 'handler_name', 'status', 'status_display',

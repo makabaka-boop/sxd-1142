@@ -13,11 +13,13 @@ urlpatterns = [
 
     path('inspections/', views.InspectionRecordListCreateView.as_view(), name='inspection-list-create'),
     path('inspections/<int:pk>/', views.InspectionRecordDetailView.as_view(), name='inspection-detail'),
+    path('inspections/<int:pk>/to-repair-order/', views.InspectionRecordToRepairOrderView.as_view(), name='inspection-to-repair-order'),
 
     path('alerts/', views.AlertListView.as_view(), name='alert-list'),
     path('alerts/<int:pk>/', views.AlertDetailView.as_view(), name='alert-detail'),
     path('alerts/<int:pk>/close-request/', views.AlertCloseRequestView.as_view(), name='alert-close-request'),
     path('alerts/<int:pk>/confirm-close/', views.AlertConfirmCloseView.as_view(), name='alert-confirm-close'),
+    path('alerts/<int:pk>/to-repair-order/', views.AlertToRepairOrderView.as_view(), name='alert-to-repair-order'),
     path('alerts/run-checks/', views.AlertRunChecksView.as_view(), name='alert-run-checks'),
 
     path('repair-orders/', views.RepairOrderListCreateView.as_view(), name='repair-order-list-create'),
@@ -33,6 +35,9 @@ urlpatterns = [
     path('stats/repair/by-handler/', views.RepairStatsByHandlerView.as_view(), name='repair-stats-by-handler'),
     path('stats/repair/by-fault-type/', views.RepairStatsByFaultTypeView.as_view(), name='repair-stats-by-fault-type'),
     path('stats/repair/by-status/', views.RepairStatsByStatusView.as_view(), name='repair-stats-by-status'),
+
+    path('stats/inspection/by-equipment/', views.InspectionStatsByEquipmentView.as_view(), name='inspection-stats-by-equipment'),
+    path('stats/inspection/trace/', views.InspectionRepairTraceView.as_view(), name='inspection-repair-trace'),
 
     path('export/alerts/', views.ExportAlertsCsvView.as_view(), name='export-alerts'),
     path('export/stats-by-equipment/', views.ExportStatsByEquipmentCsvView.as_view(), name='export-stats-by-equipment'),

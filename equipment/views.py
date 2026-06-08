@@ -1,4 +1,5 @@
 import csv
+import hashlib
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -108,7 +109,31 @@ class InspectionRecordListCreateView(generics.ListCreateAPIView):
         return [IsNotObserver()]
 
     def perform_create(self, serializer):
-        serializer.save(inspector=self.request.user)
+        record = serializer.save(inspector=self.request.user)
+        if record.status == InspectionRecord.STATUS_ABNORMAL:
+            self._create_inspection_alert(record)
+
+    @staticmethod
+    def _create_inspection_alert(record):
+        issue_key_extra = f'inspection:{record.id}'
+        raw = f'{record.equipment_id}:{Alert.TYPE_INSPECTION_ABNORMAL}:{issue_key_extra.strip().lower()}'
+        issue_key = hashlib.md5(raw.encode('utf-8')).hexdigest()
+        existing = Alert.objects.filter(issue_key=issue_key).exclude(status=Alert.STATUS_CLOSED).first()
+        if existing:
+            return
+        title = f'巡查异常: {record.equipment.name}'
+        desc = f'{record.equipment.name}(编号{record.equipment.code}) 巡查发现异常'
+        if record.issue_description:
+            desc += f'，问题: {record.issue_description}'
+        Alert.objects.create(
+            equipment_id=record.equipment_id,
+            inspection_record=record,
+            alert_type=Alert.TYPE_INSPECTION_ABNORMAL,
+            title=title,
+            description=desc,
+            issue_key=issue_key,
+            assigned_to=record.equipment.responsible_person,
+        )
 
 
 class InspectionRecordDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -198,6 +223,114 @@ class AlertRunChecksView(views.APIView):
         })
 
 
+class InspectionRecordToRepairOrderView(views.APIView):
+    permission_classes = [IsAdminOrFieldStaff]
+
+    def post(self, request, pk):
+        try:
+            record = InspectionRecord.objects.select_related('equipment').get(pk=pk)
+        except InspectionRecord.DoesNotExist:
+            return Response({'detail': '巡查记录不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+        if record.status != InspectionRecord.STATUS_ABNORMAL:
+            return Response({'detail': '只能对异常巡查记录创建维修工单'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = RepairOrder.objects.filter(
+            inspection_record=record
+        ).exclude(status=RepairOrder.STATUS_CLOSED).first()
+        if existing:
+            return Response(
+                {'detail': '该巡查记录已有未关闭的维修工单', 'repair_order_id': existing.id},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        alert = record.alerts.exclude(status=Alert.STATUS_CLOSED).first()
+
+        fault_description = record.issue_description or '巡查发现异常'
+        priority = RepairOrder.PRIORITY_HIGH
+        handler = record.equipment.responsible_person
+
+        order = RepairOrder.objects.create(
+            equipment=record.equipment,
+            inspection_record=record,
+            alert=alert,
+            fault_type=RepairOrder.FAULT_OTHER,
+            fault_description=fault_description,
+            priority=priority,
+            handler=handler,
+            created_by=request.user,
+        )
+
+        if handler and order.status == RepairOrder.STATUS_PENDING:
+            order.status = RepairOrder.STATUS_IN_PROGRESS
+            order.save()
+
+        if alert and alert.status != Alert.STATUS_PROCESSING:
+            alert.status = Alert.STATUS_PROCESSING
+            alert.save()
+
+        if order.equipment.status != Equipment.STATUS_UNDER_REPAIR:
+            order.equipment.status = Equipment.STATUS_UNDER_REPAIR
+            order.equipment.save()
+
+        return Response(RepairOrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+
+class AlertToRepairOrderView(views.APIView):
+    permission_classes = [IsAdminOrFieldStaff]
+
+    def post(self, request, pk):
+        try:
+            alert = Alert.objects.select_related('equipment', 'inspection_record').get(pk=pk)
+        except Alert.DoesNotExist:
+            return Response({'detail': '提醒不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+        if alert.status == Alert.STATUS_CLOSED:
+            return Response({'detail': '已关闭的提醒不能创建维修工单'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = RepairOrder.objects.filter(
+            alert=alert
+        ).exclude(status=RepairOrder.STATUS_CLOSED).first()
+        if existing:
+            return Response(
+                {'detail': '该提醒已有未关闭的维修工单', 'repair_order_id': existing.id},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        inspection_record = alert.inspection_record
+        if inspection_record and inspection_record.status != InspectionRecord.STATUS_ABNORMAL:
+            inspection_record = None
+
+        fault_description = alert.description or alert.title
+        priority = RepairOrder.PRIORITY_HIGH
+        handler = alert.assigned_to or alert.equipment.responsible_person
+
+        order = RepairOrder.objects.create(
+            equipment=alert.equipment,
+            inspection_record=inspection_record,
+            alert=alert,
+            fault_type=RepairOrder.FAULT_OTHER,
+            fault_description=fault_description,
+            priority=priority,
+            handler=handler,
+            created_by=request.user,
+        )
+
+        if handler and order.status == RepairOrder.STATUS_PENDING:
+            order.status = RepairOrder.STATUS_IN_PROGRESS
+            order.save()
+
+        if alert.status != Alert.STATUS_PROCESSING:
+            alert.status = Alert.STATUS_PROCESSING
+            alert.save()
+
+        if order.equipment.status != Equipment.STATUS_UNDER_REPAIR:
+            order.equipment.status = Equipment.STATUS_UNDER_REPAIR
+            order.equipment.save()
+
+        return Response(RepairOrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+
 class StatsByEquipmentView(views.APIView):
     permission_classes = [IsAuthenticated]
 
@@ -214,6 +347,8 @@ class StatsByEquipmentView(views.APIView):
             open_count=Count('id', filter=Q(status=Alert.STATUS_OPEN)),
             processing_count=Count('id', filter=Q(status=Alert.STATUS_PROCESSING)),
             closed_count=Count('id', filter=Q(status=Alert.STATUS_CLOSED)),
+            inspection_abnormal_count=Count('id', filter=Q(alert_type=Alert.TYPE_INSPECTION_ABNORMAL)),
+            linked_repair_count=Count('id', filter=Q(repair_orders__isnull=False)),
         ).order_by('-total')
 
         return Response(list(stats))
@@ -235,6 +370,7 @@ class StatsByResponsiblePersonView(views.APIView):
             open_count=Count('id', filter=Q(status=Alert.STATUS_OPEN)),
             processing_count=Count('id', filter=Q(status=Alert.STATUS_PROCESSING)),
             closed_count=Count('id', filter=Q(status=Alert.STATUS_CLOSED)),
+            inspection_abnormal_count=Count('id', filter=Q(alert_type=Alert.TYPE_INSPECTION_ABNORMAL)),
         ).order_by('-total')
 
         return Response(list(stats))
@@ -242,7 +378,7 @@ class StatsByResponsiblePersonView(views.APIView):
 
 class _ExportMixin:
     def _build_alert_queryset(self, request):
-        queryset = Alert.objects.select_related('equipment', 'assigned_to', 'close_requested_by', 'confirmed_by').all()
+        queryset = Alert.objects.select_related('equipment', 'assigned_to', 'close_requested_by', 'confirmed_by', 'inspection_record').all()
         equipment_id = request.query_params.get('equipment')
         alert_type = request.query_params.get('alert_type')
         alert_status = request.query_params.get('status')
@@ -265,7 +401,7 @@ class ExportAlertsCsvView(views.APIView, _ExportMixin):
         writer = csv.writer(response)
         writer.writerow([
             'ID', '器械编号', '器械名称', '提醒类型', '标题', '描述',
-            '状态', '指派处理人', '关闭申请说明', '关闭申请人', '关闭申请时间',
+            '状态', '指派处理人', '关联巡查记录ID', '关闭申请说明', '关闭申请人', '关闭申请时间',
             '确认关闭人', '确认关闭时间', '创建时间',
         ])
         for alert in queryset:
@@ -278,6 +414,7 @@ class ExportAlertsCsvView(views.APIView, _ExportMixin):
                 alert.description,
                 alert.get_status_display(),
                 alert.assigned_to.username if alert.assigned_to else '',
+                alert.inspection_record_id or '',
                 alert.close_request_note,
                 alert.close_requested_by.username if alert.close_requested_by else '',
                 alert.close_requested_at.strftime('%Y-%m-%d %H:%M:%S') if alert.close_requested_at else '',
@@ -524,12 +661,18 @@ class RepairOrderConfirmCloseView(views.APIView):
             order.alert.confirmed_by = request.user
             order.alert.save()
 
-        if order.inspection_record and order.inspection_record.status == InspectionRecord.STATUS_ABNORMAL:
+        if order.inspection_record and order.inspection_record.status in (
+            InspectionRecord.STATUS_ABNORMAL, InspectionRecord.STATUS_NORMAL
+        ):
             active_repairs = RepairOrder.objects.filter(
                 inspection_record=order.inspection_record
             ).exclude(status=RepairOrder.STATUS_CLOSED).exclude(pk=order.pk)
             if not active_repairs.exists():
-                order.inspection_record.status = InspectionRecord.STATUS_NORMAL
+                order.inspection_record.status = InspectionRecord.STATUS_RESOLVED
+                resolution = f'维修工单#{order.id}已关闭'
+                if order.completion_note:
+                    resolution += f'，完成说明: {order.completion_note}'
+                order.inspection_record.resolution_result = resolution
                 order.inspection_record.save()
 
         if order.equipment.maintenance_plans.filter(is_active=True).exists():
@@ -559,6 +702,7 @@ class RepairStatsByEquipmentView(views.APIView):
             in_progress_count=Count('id', filter=Q(status=RepairOrder.STATUS_IN_PROGRESS)),
             completion_requested_count=Count('id', filter=Q(status=RepairOrder.STATUS_COMPLETION_REQUESTED)),
             closed_count=Count('id', filter=Q(status=RepairOrder.STATUS_CLOSED)),
+            from_inspection_count=Count('id', filter=Q(inspection_record__isnull=False)),
         ).order_by('-total')
 
         return Response(list(stats))
@@ -631,6 +775,70 @@ class RepairStatsByStatusView(views.APIView):
         return Response(list(stats))
 
 
+class InspectionStatsByEquipmentView(views.APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = InspectionRecord.objects.all()
+        equipment_id = request.query_params.get('equipment')
+        if equipment_id:
+            queryset = queryset.filter(equipment_id=equipment_id)
+
+        stats = queryset.values(
+            'equipment__id', 'equipment__name', 'equipment__code'
+        ).annotate(
+            total=Count('id'),
+            normal_count=Count('id', filter=Q(status=InspectionRecord.STATUS_NORMAL)),
+            abnormal_count=Count('id', filter=Q(status=InspectionRecord.STATUS_ABNORMAL)),
+            resolved_count=Count('id', filter=Q(status=InspectionRecord.STATUS_RESOLVED)),
+            linked_repair_count=Count('id', filter=Q(repair_orders__isnull=False)),
+        ).order_by('-total')
+
+        return Response(list(stats))
+
+
+class InspectionRepairTraceView(views.APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        queryset = InspectionRecord.objects.select_related(
+            'equipment', 'inspector'
+        ).prefetch_related('alerts', 'repair_orders')
+        equipment_id = request.query_params.get('equipment')
+        inspection_status = request.query_params.get('status')
+        if equipment_id:
+            queryset = queryset.filter(equipment_id=equipment_id)
+        if inspection_status:
+            queryset = queryset.filter(status=inspection_status)
+        queryset = queryset.filter(status__in=[
+            InspectionRecord.STATUS_ABNORMAL, InspectionRecord.STATUS_RESOLVED
+        ]).order_by('-created_at')
+
+        results = []
+        for record in queryset:
+            alert = record.alerts.first()
+            repair_order = record.repair_orders.first()
+            results.append({
+                'inspection_id': record.id,
+                'equipment_id': record.equipment_id,
+                'equipment_name': record.equipment.name,
+                'equipment_code': record.equipment.code,
+                'inspector': record.inspector.username if record.inspector else None,
+                'inspection_date': record.inspection_date,
+                'inspection_status': record.get_status_display(),
+                'issue_description': record.issue_description,
+                'resolution_result': record.resolution_result,
+                'alert_id': alert.id if alert else None,
+                'alert_title': alert.title if alert else None,
+                'alert_status': alert.get_status_display() if alert else None,
+                'repair_order_id': repair_order.id if repair_order else None,
+                'repair_order_status': repair_order.get_status_display() if repair_order else None,
+                'repair_order_handler': repair_order.handler.username if repair_order and repair_order.handler else None,
+            })
+
+        return Response(results)
+
+
 class ExportRepairOrdersCsvView(views.APIView):
     permission_classes = [IsAuthenticated]
 
@@ -666,7 +874,7 @@ class ExportRepairOrdersCsvView(views.APIView):
         writer.writerow([
             'ID', '器械编号', '器械名称', '故障类型', '故障描述', '优先级',
             '期望完成时间', '处理人', '工单状态', '处理说明', '完成说明',
-            '完成时间', '创建人', '确认关闭人', '确认关闭时间', '关联提醒ID', '关联巡查记录ID', '创建时间',
+            '完成时间', '创建人', '确认关闭人', '确认关闭时间', '关联提醒ID', '关联巡查记录ID', '巡查处理结果', '创建时间',
         ])
         for order in queryset:
             writer.writerow([
@@ -687,6 +895,7 @@ class ExportRepairOrdersCsvView(views.APIView):
                 order.confirmed_at.strftime('%Y-%m-%d %H:%M:%S') if order.confirmed_at else '',
                 order.alert_id or '',
                 order.inspection_record_id or '',
+                order.inspection_record.resolution_result if order.inspection_record else '',
                 order.created_at.strftime('%Y-%m-%d %H:%M:%S'),
             ])
         return response
