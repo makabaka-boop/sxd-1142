@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import User, Equipment, MaintenancePlan, InspectionRecord, Alert
+from .models import User, Equipment, MaintenancePlan, InspectionRecord, Alert, RepairOrder, RepairProgress
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -95,4 +95,77 @@ class AlertCloseRequestSerializer(serializers.Serializer):
 
 
 class AlertConfirmCloseSerializer(serializers.Serializer):
+    pass
+
+
+class RepairProgressSerializer(serializers.ModelSerializer):
+    submitter_name = serializers.CharField(source='submitter.username', read_only=True, default=None)
+
+    class Meta:
+        model = RepairProgress
+        fields = ['id', 'repair_order', 'submitter', 'submitter_name', 'content', 'created_at']
+        read_only_fields = ['id', 'created_at']
+
+
+class RepairOrderSerializer(serializers.ModelSerializer):
+    equipment_name = serializers.CharField(source='equipment.name', read_only=True)
+    equipment_code = serializers.CharField(source='equipment.code', read_only=True)
+    handler_name = serializers.CharField(source='handler.username', read_only=True, default=None)
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True, default=None)
+    confirmed_by_name = serializers.CharField(source='confirmed_by.username', read_only=True, default=None)
+    fault_type_display = serializers.CharField(source='get_fault_type_display', read_only=True)
+    priority_display = serializers.CharField(source='get_priority_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    alert_title = serializers.CharField(source='alert.title', read_only=True, default=None)
+    progresses = RepairProgressSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = RepairOrder
+        fields = [
+            'id', 'equipment', 'equipment_name', 'equipment_code',
+            'inspection_record', 'alert', 'alert_title',
+            'fault_type', 'fault_type_display', 'fault_description',
+            'priority', 'priority_display', 'expected_completion_time',
+            'handler', 'handler_name', 'status', 'status_display',
+            'processing_note', 'completion_note', 'completion_time',
+            'created_by', 'created_by_name',
+            'confirmed_by', 'confirmed_by_name', 'confirmed_at',
+            'created_at', 'updated_at', 'progresses',
+        ]
+        read_only_fields = [
+            'id', 'status', 'completion_note', 'completion_time',
+            'confirmed_by', 'confirmed_at', 'created_at', 'updated_at',
+        ]
+
+
+class RepairOrderCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RepairOrder
+        fields = [
+            'id', 'equipment', 'inspection_record', 'alert',
+            'fault_type', 'fault_description', 'priority',
+            'expected_completion_time', 'handler',
+        ]
+        read_only_fields = ['id']
+
+    def validate_inspection_record(self, value):
+        if value and value.status != InspectionRecord.STATUS_ABNORMAL:
+            raise serializers.ValidationError('只能关联异常巡查记录')
+        return value
+
+    def validate_alert(self, value):
+        if value and value.status == Alert.STATUS_CLOSED:
+            raise serializers.ValidationError('不能关联已关闭的提醒')
+        return value
+
+
+class RepairProgressSubmitSerializer(serializers.Serializer):
+    content = serializers.CharField(required=True, min_length=1)
+
+
+class RepairOrderCompletionRequestSerializer(serializers.Serializer):
+    completion_note = serializers.CharField(required=True, min_length=1)
+
+
+class RepairOrderConfirmCloseSerializer(serializers.Serializer):
     pass

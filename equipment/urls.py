@@ -20,10 +20,24 @@ urlpatterns = [
     path('alerts/<int:pk>/confirm-close/', views.AlertConfirmCloseView.as_view(), name='alert-confirm-close'),
     path('alerts/run-checks/', views.AlertRunChecksView.as_view(), name='alert-run-checks'),
 
+    path('repair-orders/', views.RepairOrderListCreateView.as_view(), name='repair-order-list-create'),
+    path('repair-orders/<int:pk>/', views.RepairOrderDetailView.as_view(), name='repair-order-detail'),
+    path('repair-orders/<int:pk>/submit-progress/', views.RepairOrderSubmitProgressView.as_view(), name='repair-order-submit-progress'),
+    path('repair-orders/<int:pk>/completion-request/', views.RepairOrderCompletionRequestView.as_view(), name='repair-order-completion-request'),
+    path('repair-orders/<int:pk>/confirm-close/', views.RepairOrderConfirmCloseView.as_view(), name='repair-order-confirm-close'),
+
     path('stats/by-equipment/', views.StatsByEquipmentView.as_view(), name='stats-by-equipment'),
     path('stats/by-person/', views.StatsByResponsiblePersonView.as_view(), name='stats-by-person'),
+
+    path('stats/repair/by-equipment/', views.RepairStatsByEquipmentView.as_view(), name='repair-stats-by-equipment'),
+    path('stats/repair/by-handler/', views.RepairStatsByHandlerView.as_view(), name='repair-stats-by-handler'),
+    path('stats/repair/by-fault-type/', views.RepairStatsByFaultTypeView.as_view(), name='repair-stats-by-fault-type'),
+    path('stats/repair/by-status/', views.RepairStatsByStatusView.as_view(), name='repair-stats-by-status'),
 
     path('export/alerts/', views.ExportAlertsCsvView.as_view(), name='export-alerts'),
     path('export/stats-by-equipment/', views.ExportStatsByEquipmentCsvView.as_view(), name='export-stats-by-equipment'),
     path('export/stats-by-person/', views.ExportStatsByPersonCsvView.as_view(), name='export-stats-by-person'),
+
+    path('export/repair-orders/', views.ExportRepairOrdersCsvView.as_view(), name='export-repair-orders'),
+    path('export/repair-stats/', views.ExportRepairStatsCsvView.as_view(), name='export-repair-stats'),
 ]

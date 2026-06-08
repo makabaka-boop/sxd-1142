@@ -177,3 +177,102 @@ class Alert(models.Model):
 
     def __str__(self):
         return f'{self.equipment.name} - {self.get_alert_type_display()} - {self.get_status_display()}'
+
+
+class RepairOrder(models.Model):
+    FAULT_MECHANICAL = 'mechanical'
+    FAULT_ELECTRICAL = 'electrical'
+    FAULT_WEAR = 'wear'
+    FAULT_SOFTWARE = 'software'
+    FAULT_OTHER = 'other'
+    FAULT_TYPE_CHOICES = [
+        (FAULT_MECHANICAL, '机械故障'),
+        (FAULT_ELECTRICAL, '电气故障'),
+        (FAULT_WEAR, '磨损老化'),
+        (FAULT_SOFTWARE, '软件故障'),
+        (FAULT_OTHER, '其他'),
+    ]
+    PRIORITY_LOW = 'low'
+    PRIORITY_MEDIUM = 'medium'
+    PRIORITY_HIGH = 'high'
+    PRIORITY_URGENT = 'urgent'
+    PRIORITY_CHOICES = [
+        (PRIORITY_LOW, '低'),
+        (PRIORITY_MEDIUM, '中'),
+        (PRIORITY_HIGH, '高'),
+        (PRIORITY_URGENT, '紧急'),
+    ]
+    STATUS_PENDING = 'pending'
+    STATUS_IN_PROGRESS = 'in_progress'
+    STATUS_COMPLETION_REQUESTED = 'completion_requested'
+    STATUS_CLOSED = 'closed'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, '待处理'),
+        (STATUS_IN_PROGRESS, '处理中'),
+        (STATUS_COMPLETION_REQUESTED, '申请完成'),
+        (STATUS_CLOSED, '已关闭'),
+    ]
+    equipment = models.ForeignKey(
+        Equipment, on_delete=models.CASCADE,
+        related_name='repair_orders', verbose_name='器械'
+    )
+    inspection_record = models.ForeignKey(
+        InspectionRecord, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='repair_orders', verbose_name='关联巡查记录'
+    )
+    alert = models.ForeignKey(
+        Alert, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='repair_orders', verbose_name='关联提醒'
+    )
+    fault_type = models.CharField('故障类型', max_length=20, choices=FAULT_TYPE_CHOICES, default=FAULT_OTHER)
+    fault_description = models.TextField('故障描述', blank=True, default='')
+    priority = models.CharField('优先级', max_length=20, choices=PRIORITY_CHOICES, default=PRIORITY_MEDIUM)
+    expected_completion_time = models.DateTimeField('期望完成时间', null=True, blank=True)
+    handler = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='handled_repair_orders', verbose_name='处理人'
+    )
+    status = models.CharField('工单状态', max_length=30, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    processing_note = models.TextField('处理说明', blank=True, default='')
+    completion_note = models.TextField('完成说明', blank=True, default='')
+    completion_time = models.DateTimeField('完成时间', null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='created_repair_orders', verbose_name='创建人'
+    )
+    confirmed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='confirmed_repair_orders', verbose_name='确认关闭人'
+    )
+    confirmed_at = models.DateTimeField('确认关闭时间', null=True, blank=True)
+    created_at = models.DateTimeField('创建时间', auto_now_add=True)
+    updated_at = models.DateTimeField('更新时间', auto_now=True)
+
+    class Meta:
+        verbose_name = '维修工单'
+        verbose_name_plural = '维修工单'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.equipment.name} - {self.get_fault_type_display()} - {self.get_status_display()}'
+
+
+class RepairProgress(models.Model):
+    repair_order = models.ForeignKey(
+        RepairOrder, on_delete=models.CASCADE,
+        related_name='progresses', verbose_name='维修工单'
+    )
+    submitter = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True,
+        related_name='repair_progresses', verbose_name='提交人'
+    )
+    content = models.TextField('进展内容')
+    created_at = models.DateTimeField('提交时间', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '维修进展'
+        verbose_name_plural = '维修进展'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.repair_order} - 进展 - {self.created_at}'
